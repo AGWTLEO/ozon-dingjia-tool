@@ -1,0 +1,17 @@
+﻿物流标准,物流时效,渠道名称,资费标准,每克单价,每票固定费,备注
+Extra Small,5-10天,CEL Express Extra Small,0.0468 元/克 + 3.12 元/票,0.0468,3.12,超级轻小件（陆空特快）
+Extra Small,10-15天,CEL Standard Extra Small,0.0364 元/克 + 3.12 元/票,0.0364,3.12,超级轻小件（陆空标准）
+Extra Small,15-25天,CEL Economy Extra Small,0.026 元/克 + 3.12 元/票,0.026,3.12,超级轻小件（陆运经济）
+Budget,5-10天,CEL Express Budget,0.03432 元/克 + 23.92 元/票,0.03432,23.92,低客单价标准件（陆空特快）
+Budget,10-15天,CEL Standard Budget,0.026 元/克 + 23.92 元/票,0.026,23.92,低客单价标准件（陆空标准）
+Budget,15-25天,CEL Economy Budget,0.01768 元/克 + 23.92 元/票,0.01768,23.92,低客单价标准件（陆运经济）
+Small,5-10天,CEL Express Small,0.0468 元/克 + 16.64 元/票,0.0468,16.64,小件（陆空特快）
+Small,10-15天,CEL Standard Small,0.0364 元/克 + 16.64 元/票,0.0364,16.64,小件（陆空标准）
+Small,15-25天,CEL Economy Small,0.026 元/克 + 16.64 元/票,0.026,16.64,小件（陆运经济）
+Big,10-15天,CEL Standard Big,0.026 元/克 + 37.44 元/票,0.026,37.44,大件（陆空标准）
+Big,15-25天,CEL Economy Big,0.01768 元/克 + 37.44 元/票,0.01768,37.44,大件（陆运经济）
+Premium Small,5-10天,CEL Express Premium Small,0.0468 元/克 + 22.88 元/票,0.0468,22.88,高客单价小件（陆空特快）
+Premium Small,10-15天,CEL Standard Premium Small,0.0364 元/克 + 22.88 元/票,0.0364,22.88,高客单价小件（陆空标准）
+Premium Small,15-25天,CEL Economy Premium Small,0.026 元/克 + 22.88 元/票,0.026,22.88,高客单价小件（陆运经济）
+Premium Big,10-15天,CEL Standard Premium Big,0.02912 元/克 + 64.48 元/票,0.02912,64.48,高客单价大件（陆空标准）
+Premium Big,15-25天,CEL Economy Premium Big,0.02392 元/克 + 64.48 元/票,0.02392,64.48,高客单价大件（陆运经济）
