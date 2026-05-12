@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -428,14 +429,14 @@ def show_result_tables(result: dict[str, Any]) -> None:
         [
             ("建议售价", money(result.get("建议售价")), "", "blue"),
             ("当前售价", money(result.get("当前售价")) if result.get("当前售价") != "" else "未填写", "", "blue"),
+            ("总成本", money(result.get("总成本")), "", "blue"),
             ("净利润", money(result.get("净利润")), "", status_variant(result.get("是否适合上架", ""))),
-            ("利润率", pct(result.get("利润率")), "", status_variant(result.get("是否适合上架", ""))),
         ],
         [
+            ("利润率", pct(result.get("利润率")), "", status_variant(result.get("是否适合上架", ""))),
             ("保本售价", money(result.get("保本售价")), "", "blue"),
             ("物流标准", result.get("物流标准") or "未匹配", result.get("选择时效", ""), status_variant(result.get("时效是否支持", ""))),
             ("是否适合上架", result.get("是否适合上架", "-"), "", status_variant(result.get("是否适合上架", ""))),
-            ("是否达到目标", result.get("是否达到目标利润率", "-"), "", status_variant(result.get("是否达到目标利润率", ""))),
         ],
     ]
     for row in metric_rows:
@@ -527,6 +528,65 @@ def show_result_tables(result: dict[str, Any]) -> None:
                 status_card(note)
 
 
+def simple_ppc_risk_text(break_even_clicks: float) -> str:
+    if break_even_clicks < 10:
+        return "风险高，不建议直接开 PPC。"
+    if break_even_clicks <= 30:
+        return "可以小预算测试，但需要严格控制 CPC。"
+    if break_even_clicks <= 60:
+        return "可以测试，超过该点击数还不出单应暂停观察。"
+    return "PPC 承受能力较好，可以进行测试。"
+
+
+def show_simple_ppc_module(result: dict[str, Any]) -> None:
+    with st.container(border=True):
+        card_title("PPC 点击付费承受能力")
+        cpc_rub = st.number_input(
+            "每次点击出价 CPC，卢布",
+            min_value=0.0,
+            value=10.0,
+            step=0.5,
+            key="simple_ppc_cpc_rub",
+        )
+        exchange_rate = float(result.get("使用汇率") or 0)
+        net_profit = float(result.get("净利润") or 0)
+        cpc_cny = cpc_rub / exchange_rate if cpc_rub > 0 and exchange_rate > 0 else 0
+
+        if cpc_cny <= 0:
+            status_card("请先填写大于 0 的 CPC 和有效汇率。")
+            return
+
+        if net_profit <= 0:
+            metric_cols = st.columns(3)
+            with metric_cols[0]:
+                metric_card("CPC 卢布", f"₽{cpc_rub:.2f}", variant="blue")
+            with metric_cols[1]:
+                metric_card("CPC 人民币", money(cpc_cny), variant="blue")
+            with metric_cols[2]:
+                metric_card("当前单品净利润", money(net_profit), variant="red")
+            status_card("当前单品净利润不为正，不建议开 PPC。")
+            return
+
+        break_even_clicks = net_profit / cpc_cny
+        break_even_cvr = 1 / break_even_clicks if break_even_clicks > 0 else 0
+        risk_text = simple_ppc_risk_text(break_even_clicks)
+
+        ppc_cols = st.columns(5)
+        with ppc_cols[0]:
+            metric_card("CPC 卢布", f"₽{cpc_rub:.2f}", variant="blue")
+        with ppc_cols[1]:
+            metric_card("CPC 人民币", money(cpc_cny), variant="blue")
+        with ppc_cols[2]:
+            metric_card("当前单品净利润", money(net_profit), variant=status_variant(net_profit))
+        with ppc_cols[3]:
+            metric_card("PPC 盈亏平衡点击数", f"{break_even_clicks:.2f} 次", variant=status_variant(risk_text))
+        with ppc_cols[4]:
+            metric_card("PPC 盈亏平衡转化率", f"{break_even_cvr:.2%}", variant="blue")
+
+        status_card(f"约 {ceil(break_even_clicks)} 次点击内必须出 1 单，PPC 才能盈亏持平。")
+        status_card(risk_text)
+
+
 def single_pricing_tab(
     settings: dict[str, Any],
     exchange_info: dict[str, Any],
@@ -534,16 +594,15 @@ def single_pricing_tab(
     logistics_standards: pd.DataFrame,
     logistics_prices: pd.DataFrame,
 ) -> None:
-    page_header("单品定价", "输入单个 SKU 的成本、尺寸和售价信息，自动匹配物流、佣金并测算利润。")
+    page_header("单品测算", "输入单个商品的成本、尺寸、物流和售价信息，快速测算建议售价、利润和 PPC 承受能力。")
 
     categories = category_options(commission_rules)
+    sku = ""
+    product_name = ""
 
     with st.container(border=True):
         card_title("基础信息")
-        base_cols = st.columns(3)
-        sku = base_cols[0].text_input("SKU")
-        product_name = base_cols[1].text_input("产品名称")
-        category = base_cols[2].selectbox("所属类目 *", categories)
+        category = st.selectbox("所属类目 *", categories)
 
         cost_cols = st.columns(4)
         purchase_cost = cost_cols[0].number_input("采购成本，人民币 *", min_value=0.0, value=0.0, step=1.0)
@@ -663,45 +722,34 @@ def single_pricing_tab(
         chosen_logistics_speed = current_speed if logistics_speed == "请重新选择有效时效" else logistics_speed
 
     with st.container(border=True):
-        card_title("售价与利润")
-        price_cols = st.columns(3)
+        card_title("售价与平台费用")
+        price_cols = st.columns(2)
         current_price_cny = price_cols[0].number_input(
             "当前售价，人民币，可选", min_value=0.0, value=0.0, step=1.0
         )
         target_profit_rate = percent_input(
             "目标利润率 % *", 0.2, "single_target_profit", container=price_cols[1]
         )
-        reserve_ad = price_cols[2].checkbox(
-            "是否预留广告费", value=float(settings["default_ad_rate"]) > 0
-        )
+        ad_rate = float(settings.get("default_ad_rate", 0.0))
 
-        fee_cols = st.columns(4)
-        ad_rate = percent_input(
-            "广告费比例 %",
-            float(settings["default_ad_rate"]),
-            "single_ad_rate",
-            disabled=not reserve_ad,
-            container=fee_cols[0],
-        )
-        if not reserve_ad:
-            ad_rate = 0.0
+        fee_cols = st.columns(3)
         withdrawal_rate = percent_input(
             "提现手续费费率 %",
             float(settings["default_withdrawal_rate"]),
             "single_withdrawal_rate",
-            container=fee_cols[1],
+            container=fee_cols[0],
         )
         return_rate = percent_input(
             "退货率 %",
             float(settings["default_return_rate"]),
             "single_return_rate",
-            container=fee_cols[2],
+            container=fee_cols[1],
         )
         tax_rate = percent_input(
             "税费比例 %",
             float(settings["default_tax_rate"]),
             "single_tax_rate",
-            container=fee_cols[3],
+            container=fee_cols[2],
         )
         submitted = st.button("开始计算", type="primary")
 
@@ -736,8 +784,11 @@ def single_pricing_tab(
             st.session_state["latest_result_df"] = pd.DataFrame([result])
             st.session_state["latest_result_name"] = f"{sku or '单品'}_定价结果.xlsx"
             show_result_tables(result)
+            show_simple_ppc_module(result)
         elif "latest_result_df" in st.session_state and len(st.session_state["latest_result_df"]) == 1:
-            show_result_tables(st.session_state["latest_result_df"].iloc[0].to_dict())
+            result = st.session_state["latest_result_df"].iloc[0].to_dict()
+            show_result_tables(result)
+            show_simple_ppc_module(result)
         else:
             card_title("计算结果")
             st.info("填写信息后点击“开始计算”，这里会显示建议售价、利润、保本售价、物流标准和上架判断。")
@@ -1215,14 +1266,10 @@ def main() -> None:
     )
     apply_theme()
     st.sidebar.markdown("## Ozon 定价工具")
-    st.sidebar.caption("运营后台 / 财务测算")
-    page = st.sidebar.radio(
-        "导航",
-        ["单品定价", "批量计算", "推广测算", "规则设置", "结果导出"],
-        label_visibility="collapsed",
-    )
+    st.sidebar.caption("单品测算简化版")
+    st.sidebar.radio("导航", ["单品测算"], label_visibility="collapsed")
     st.sidebar.markdown("---")
-    st.sidebar.caption("本地运行，不连接 Ozon 后台。")
+    st.sidebar.caption("普通用户只看到单品测算；批量、CPO、组合推广等复杂功能已隐藏。")
 
     settings = load_settings()
     exchange_info = get_exchange_state(settings)
@@ -1230,16 +1277,7 @@ def main() -> None:
     logistics_standards = load_csv(LOGISTICS_STANDARDS_PATH, LOGISTICS_STANDARD_COLUMNS)
     logistics_prices = load_csv(LOGISTICS_PRICES_PATH, LOGISTICS_PRICE_COLUMNS)
 
-    if page == "单品定价":
-        single_pricing_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
-    elif page == "批量计算":
-        batch_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
-    elif page == "推广测算":
-        promotion_tab(exchange_info)
-    elif page == "规则设置":
-        settings_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
-    else:
-        export_tab()
+    single_pricing_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
 
 
 if __name__ == "__main__":
