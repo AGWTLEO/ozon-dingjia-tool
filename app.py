@@ -1075,7 +1075,7 @@ def settings_tab(
     logistics_standards: pd.DataFrame,
     logistics_prices: pd.DataFrame,
 ) -> None:
-    page_header("规则设置", "维护默认费用、佣金率、物流标准和物流价格表。保存后刷新页面即可按新规则计算。")
+    page_header("规则设置", "维护默认费用、税费、汇率、佣金率、物流标准、货值区间和物流时效价格。保存后刷新页面即可按新规则计算。")
 
     default_tab, commission_tab, standard_tab, price_tab = st.tabs(
         ["默认费用参数 / 税费 / 汇率", "类目佣金率表", "物流标准", "物流价格表"]
@@ -1083,7 +1083,7 @@ def settings_tab(
 
     with default_tab:
         show_exchange_status(exchange_info)
-        exchange_action_cols = st.columns([1, 2])
+        exchange_action_cols = st.columns([1, 1, 2])
         if exchange_action_cols[0].button("自动更新今日汇率", key="settings_update_exchange"):
             fresh = get_cny_to_rub_rate(
                 EXCHANGE_RATE_CACHE_PATH,
@@ -1097,7 +1097,24 @@ def settings_tab(
             )
             st.success("已尝试更新今日汇率。")
             st.rerun()
-        exchange_action_cols[1].caption("自动汇率每天只会请求一次；手动点击按钮会强制尝试更新。")
+        exchange_action_cols[1].download_button(
+            "下载默认参数 JSON",
+            data=json.dumps(settings, ensure_ascii=False, indent=2),
+            file_name="settings.json",
+            mime="application/json",
+            key="download_settings_json",
+        )
+        exchange_action_cols[2].caption("自动汇率每天只会请求一次；手动点击按钮会强制尝试更新。")
+
+        uploaded_settings = st.file_uploader("上传默认参数 JSON", type=["json"], key="upload_settings_json")
+        if uploaded_settings and st.button("导入并保存默认参数", key="save_uploaded_settings"):
+            try:
+                imported_settings = json.loads(uploaded_settings.getvalue().decode("utf-8"))
+                save_settings({**DEFAULT_SETTINGS, **imported_settings})
+                st.success("默认参数已导入并保存。")
+                st.rerun()
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+                st.error("默认参数 JSON 解析失败，请检查文件格式。")
 
         with st.form("default_settings_form"):
             cols = st.columns(3)
@@ -1183,6 +1200,18 @@ def settings_tab(
 
     with commission_tab:
         st.markdown("比例字段请填小数，例如 12% 填 `0.12`。售价上限留空表示无上限。")
+        commission_tools = st.columns([2, 1])
+        uploaded_commission = commission_tools[0].file_uploader(
+            "上传类目佣金率表 CSV / Excel",
+            type=["xlsx", "xls", "csv"],
+            key="upload_commission_rules",
+        )
+        if uploaded_commission and commission_tools[1].button("导入并保存佣金表", key="save_uploaded_commission"):
+            replacement_df = read_uploaded_table(uploaded_commission)
+            save_csv(replacement_df, COMMISSION_RULES_PATH, COMMISSION_COLUMNS)
+            st.success("类目佣金率表已导入并保存。")
+            st.rerun()
+
         edited_commission = st.data_editor(
             commission_rules,
             num_rows="dynamic",
@@ -1192,27 +1221,55 @@ def settings_tab(
                 "佣金率": st.column_config.NumberColumn("佣金率", min_value=0.0, max_value=1.0, step=0.01),
             },
         )
-        if st.button("保存类目佣金率表", type="primary"):
+        commission_save_cols = st.columns(2)
+        if commission_save_cols[0].button("保存类目佣金率表", type="primary", key="save_commission_rules"):
             save_csv(edited_commission, COMMISSION_RULES_PATH, COMMISSION_COLUMNS)
             st.success("类目佣金率表已保存。")
+        commission_save_cols[1].download_button(
+            "下载当前佣金率表 CSV",
+            data=edited_commission.to_csv(index=False, encoding="utf-8-sig"),
+            file_name="类目佣金率表.csv",
+            mime="text/csv",
+            key="download_commission_rules",
+        )
 
     with standard_tab:
-        st.markdown("物流标准用于匹配 Extra Small、Budget、Small、Big 等标准。计费方式可填 `实际重量` 或 `实际重量和体积重量取较大者`。")
+        st.markdown("物流标准用于匹配 Extra Small、Budget、Small、Big 等标准，也用于维护货值区间。计费方式可填 `实际重量` 或 `实际重量和体积重量取较大者`。")
+        standard_tools = st.columns([2, 1])
+        uploaded_standards = standard_tools[0].file_uploader(
+            "上传物流标准规则 CSV / Excel",
+            type=["xlsx", "xls", "csv"],
+            key="upload_logistics_standards",
+        )
+        if uploaded_standards and standard_tools[1].button("导入并保存物流标准", key="save_uploaded_standards"):
+            replacement_df = read_uploaded_table(uploaded_standards)
+            save_csv(replacement_df, LOGISTICS_STANDARDS_PATH, LOGISTICS_STANDARD_COLUMNS)
+            st.success("物流标准规则已导入并保存。")
+            st.rerun()
+
         edited_standards = st.data_editor(
             logistics_standards,
             num_rows="dynamic",
             width="stretch",
             hide_index=True,
         )
-        if st.button("保存物流标准", type="primary"):
+        standard_save_cols = st.columns(2)
+        if standard_save_cols[0].button("保存物流标准", type="primary", key="save_logistics_standards"):
             save_csv(edited_standards, LOGISTICS_STANDARDS_PATH, LOGISTICS_STANDARD_COLUMNS)
             st.success("物流标准已保存。")
+        standard_save_cols[1].download_button(
+            "下载当前物流标准 CSV",
+            data=edited_standards.to_csv(index=False, encoding="utf-8-sig"),
+            file_name="物流标准.csv",
+            mime="text/csv",
+            key="download_logistics_standards",
+        )
 
     with price_tab:
-        st.markdown("物流价格表按“物流标准 + 物流时效”匹配。跨境物流费 = 计费重量g × 每克单价 + 每票固定费。可直接编辑，也可以上传 CSV / Excel 覆盖。")
+        st.markdown("物流价格表按“物流标准 + 物流时效”匹配，用于维护物流时效价格。跨境物流费 = 计费重量g × 每克单价 + 每票固定费。可直接编辑，也可以上传 CSV / Excel 覆盖。")
         upload_cols = st.columns([2, 1])
-        replacement = upload_cols[0].file_uploader("导入物流价格表", type=["xlsx", "xls", "csv"])
-        if replacement and upload_cols[1].button("导入并保存"):
+        replacement = upload_cols[0].file_uploader("导入物流价格表 CSV / Excel", type=["xlsx", "xls", "csv"], key="upload_logistics_prices")
+        if replacement and upload_cols[1].button("导入并保存物流价格", key="save_uploaded_prices"):
             replacement_df = read_uploaded_table(replacement)
             save_csv(replacement_df, LOGISTICS_PRICES_PATH, LOGISTICS_PRICE_COLUMNS)
             st.success("物流价格表已导入并保存。")
@@ -1226,7 +1283,7 @@ def settings_tab(
             hide_index=True,
         )
         save_cols = st.columns(2)
-        if save_cols[0].button("保存物流价格表", type="primary"):
+        if save_cols[0].button("保存物流价格表", type="primary", key="save_logistics_prices"):
             save_csv(edited_prices, LOGISTICS_PRICES_PATH, LOGISTICS_PRICE_COLUMNS)
             st.success("物流价格表已保存。")
         save_cols[1].download_button(
@@ -1234,6 +1291,7 @@ def settings_tab(
             data=edited_prices.to_csv(index=False, encoding="utf-8-sig"),
             file_name="物流价格表.csv",
             mime="text/csv",
+            key="download_logistics_prices",
         )
 
 
@@ -1266,10 +1324,10 @@ def main() -> None:
     )
     apply_theme()
     st.sidebar.markdown("## Ozon 定价工具")
-    st.sidebar.caption("单品测算简化版")
-    st.sidebar.radio("导航", ["单品测算"], label_visibility="collapsed")
+    st.sidebar.caption("单品测算 + 规则维护")
+    page = st.sidebar.radio("导航", ["单品测算", "规则设置"], label_visibility="collapsed")
     st.sidebar.markdown("---")
-    st.sidebar.caption("普通用户只看到单品测算；批量、CPO、组合推广等复杂功能已隐藏。")
+    st.sidebar.caption("批量、独立推广、CPO、组合推广等复杂功能已隐藏。")
 
     settings = load_settings()
     exchange_info = get_exchange_state(settings)
@@ -1277,7 +1335,10 @@ def main() -> None:
     logistics_standards = load_csv(LOGISTICS_STANDARDS_PATH, LOGISTICS_STANDARD_COLUMNS)
     logistics_prices = load_csv(LOGISTICS_PRICES_PATH, LOGISTICS_PRICE_COLUMNS)
 
-    single_pricing_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
+    if page == "规则设置":
+        settings_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
+    else:
+        single_pricing_tab(settings, exchange_info, commission_rules, logistics_standards, logistics_prices)
 
 
 if __name__ == "__main__":
