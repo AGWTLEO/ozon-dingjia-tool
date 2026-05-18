@@ -91,20 +91,37 @@ def save_settings(settings: dict[str, Any]) -> None:
 def load_csv(path: Path, columns: list[str]) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame(columns=columns)
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, encoding="utf-8-sig")
     for column in columns:
         if column not in df.columns:
             df[column] = None
     return df[columns]
 
 
-def save_csv(df: pd.DataFrame, path: Path, columns: list[str]) -> None:
-    ensure_dirs()
+def clean_rule_table(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     cleaned = df.copy()
     for column in columns:
         if column not in cleaned.columns:
             cleaned[column] = None
-    cleaned = cleaned[columns].dropna(how="all")
+    cleaned = cleaned[columns].replace(r"^\s*$", pd.NA, regex=True).dropna(how="all")
+    primary_column = None
+    if "所属类目" in columns:
+        primary_column = "所属类目"
+    elif "物流标准" in columns:
+        primary_column = "物流标准"
+    if primary_column:
+        primary_values = cleaned[primary_column].astype("string").str.strip()
+        cleaned = cleaned[primary_values.notna() & primary_values.ne("")]
+    return cleaned.reset_index(drop=True)
+
+
+def table_signature(df: pd.DataFrame, columns: list[str]) -> str:
+    return clean_rule_table(df, columns).fillna("").to_csv(index=False)
+
+
+def save_csv(df: pd.DataFrame, path: Path, columns: list[str]) -> None:
+    ensure_dirs()
+    cleaned = clean_rule_table(df, columns)
     cleaned.to_csv(path, index=False, encoding="utf-8-sig")
 
 
@@ -1316,7 +1333,7 @@ def settings_tab(
         elif rule_section == "平台佣金规则":
             with st.container(border=True):
                 card_title("平台佣金规则")
-                st.caption("比例字段请填小数，例如 12% 填 0.12。售价上限留空表示无上限。")
+                st.caption("修改表格后会自动保存到 data/commission_rules.csv。比例字段请填小数，例如 12% 填 0.12；售价上限留空表示无上限。")
                 commission_tools = st.columns([2, 1])
                 uploaded_commission = commission_tools[0].file_uploader(
                     "上传类目佣金率表 CSV / Excel",
@@ -1329,23 +1346,33 @@ def settings_tab(
                     st.success("类目佣金率表已导入并保存。")
                     st.rerun()
 
+                auto_save_commission = st.toggle(
+                    "自动保存佣金规则",
+                    value=True,
+                    help="开启后，新增或修改佣金规则会立即写入 data/commission_rules.csv，刷新页面后仍会保留。",
+                    key="auto_save_commission_rules",
+                )
                 edited_commission = st.data_editor(
                     commission_rules,
                     num_rows="dynamic",
                     width="stretch",
                     height=520,
                     hide_index=True,
+                    key="commission_rules_editor",
                     column_config={
                         "佣金率": st.column_config.NumberColumn("佣金率", min_value=0.0, max_value=1.0, step=0.01),
                     },
                 )
+                if auto_save_commission and table_signature(edited_commission, COMMISSION_COLUMNS) != table_signature(commission_rules, COMMISSION_COLUMNS):
+                    save_csv(edited_commission, COMMISSION_RULES_PATH, COMMISSION_COLUMNS)
+                    st.success("佣金规则已自动保存，刷新页面后仍会保留。")
                 commission_save_cols = st.columns(2)
                 if commission_save_cols[0].button("保存类目佣金率表", type="primary", key="save_commission_rules"):
                     save_csv(edited_commission, COMMISSION_RULES_PATH, COMMISSION_COLUMNS)
-                    st.success("类目佣金率表已保存。")
+                    st.success("类目佣金率表已保存，刷新页面后仍会保留。")
                 commission_save_cols[1].download_button(
                     "下载当前佣金率表 CSV",
-                    data=edited_commission.to_csv(index=False, encoding="utf-8-sig"),
+                    data=clean_rule_table(edited_commission, COMMISSION_COLUMNS).to_csv(index=False, encoding="utf-8-sig"),
                     file_name="类目佣金率表.csv",
                     mime="text/csv",
                     key="download_commission_rules",
